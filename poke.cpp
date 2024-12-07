@@ -9,9 +9,6 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstddef>
-#include <functional>
-#include <bitset>
-#include <queue>
 
 using namespace std;
 
@@ -28,29 +25,6 @@ void print_help() {
     cout << "Options:\n";
     cout << "  -m, --mode {MST|FASTTSP|OPTTSP}  Specify the mode\n";
     cout << "  -h, --help                       Show this help message\n";
-}
-
-struct BBNodeWithPath {
-    size_t current;
-    size_t count;
-    double cost;
-    double bound;
-    uint64_t visited_mask;
-    vector<size_t> path;
-
-    bool operator<(const BBNodeWithPath& other) const {
-        return bound > other.bound;
-    }
-};
-
-inline double computeLowerBound(const vector<pair<double, double>>& min_two, uint64_t visited_mask, size_t n) {
-    double lb = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        if (!((visited_mask >> i) & 1ULL)) {
-            lb += min_two[i].first + min_two[i].second;
-        }
-    }
-    return lb / 2.0;
 }
 
 int main(int argc, char* argv[]) {
@@ -149,17 +123,25 @@ void handleMST(const vector<pair<int, int>>& vertices) {
 
     minEdge[0] = 0.0;
     double totalWeight = 0.0;
-    priority_queue<pair<double, size_t>, vector<pair<double, size_t>>, std::greater<pair<double, size_t>>> pq;
-    pq.emplace(0.0, 0);
 
-    while (!pq.empty()) {
-        double weight = pq.top().first;
-        size_t u = pq.top().second;
-        pq.pop();
+    for (size_t i = 0; i < n; ++i) {
+        double minDist = numeric_limits<double>::infinity();
+        size_t u = n;
 
-        if (inMST[u]) continue;
+        for (size_t v = 0; v < n; ++v) {
+            if (!inMST[v] && minEdge[v] < minDist) {
+                minDist = minEdge[v];
+                u = v;
+            }
+        }
+
+        if (u == n) {
+            cerr << "Cannot construct MST\n";
+            exit(1);
+        }
+
         inMST[u] = true;
-        totalWeight += weight;
+        totalWeight += minEdge[u];
 
         for (size_t v = 0; v < n; ++v) {
             if (!inMST[v]) {
@@ -174,22 +156,12 @@ void handleMST(const vector<pair<int, int>>& vertices) {
                     double dist = calculateDistance(vertices[u], vertices[v]);
                     if (dist < minEdge[v]) {
                         minEdge[v] = dist;
-                        pq.emplace(minEdge[v], v);
                         parent[v] = u;
                     }
                 }
             }
         }
     }
-
-    for (bool included : inMST) {
-        if (!included) {
-            cerr << "Cannot construct MST\n";
-            exit(1);
-        }
-    }
-
-    cout << totalWeight << "\n";
 
     vector<pair<size_t, size_t>> edges;
     for (size_t v = 0; v < n; ++v) {
@@ -204,6 +176,8 @@ void handleMST(const vector<pair<int, int>>& vertices) {
     }
 
     sort(edges.begin(), edges.end());
+
+    cout << totalWeight << "\n";
 
     for (const auto& edge : edges) {
         cout << edge.first << " " << edge.second << "\n";
@@ -253,11 +227,10 @@ void handleFASTTSP(const vector<pair<int, int>>& vertices) {
         for (size_t i = 1; i < n - 1; ++i) {
             bool local_improved = false;
             for (size_t k = i + 1; k < n; ++k) {
-                double delta = 0.0;
-                delta -= calculateDistance(vertices[tour[i - 1]], vertices[tour[i]]);
-                delta -= calculateDistance(vertices[tour[k]], vertices[tour[(k + 1) % n]]);
-                delta += calculateDistance(vertices[tour[i - 1]], vertices[tour[k]]);
-                delta += calculateDistance(vertices[tour[i]], vertices[tour[(k + 1) % n]]);
+                double delta = -calculateDistance(vertices[tour[i - 1]], vertices[tour[i]])
+                               -calculateDistance(vertices[tour[k]], vertices[tour[(k + 1) % n]])
+                               +calculateDistance(vertices[tour[i - 1]], vertices[tour[k]])
+                               +calculateDistance(vertices[tour[i]], vertices[tour[(k + 1) % n]]);
 
                 if (delta < -1e-6) {
                     reverse(tour.begin() + static_cast<ptrdiff_t>(i),
