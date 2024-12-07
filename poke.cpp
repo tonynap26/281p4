@@ -10,9 +10,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstddef>
-#include <cstring>
-#include <stack>
-#include <unordered_set>
+#include <functional>
 
 using namespace std;
 
@@ -125,6 +123,7 @@ void handleMST(const vector<pair<int, int>>& vertices) {
     vector<double> minEdge(n, numeric_limits<double>::infinity());
     vector<size_t> parent(n, numeric_limits<size_t>::max());
 
+    // Start from node 0
     minEdge[0] = 0.0;
     double totalWeight = 0.0;
     priority_queue<pair<double, size_t>, vector<pair<double, size_t>>, std::greater<pair<double, size_t>>> pq;
@@ -233,7 +232,6 @@ void handleFASTTSP(const vector<pair<int, int>>& vertices) {
                 double delta = 0.0;
                 delta -= calculateDistance(vertices[tour[i - 1]], vertices[tour[i]]);
                 delta -= calculateDistance(vertices[tour[k]], vertices[tour[(k + 1) % n]]);
-                
                 delta += calculateDistance(vertices[tour[i - 1]], vertices[tour[k]]);
                 delta += calculateDistance(vertices[tour[i]], vertices[tour[(k + 1) % n]]);
 
@@ -279,41 +277,15 @@ struct BBNode {
     }
 };
 
-double calculateMST(const vector<vector<double>>& dist, const vector<size_t>& nodes, size_t n) {
-    if (nodes.empty()) return 0.0;
-
-    double mst_cost = 0.0;
-    vector<bool> inMST(n, false);
-    vector<double> minEdge(n, numeric_limits<double>::infinity());
-
-    minEdge[nodes[0]] = 0.0;
-    priority_queue<pair<double, size_t>, vector<pair<double, size_t>>, std::greater<pair<double, size_t>>> pq;
-    pq.emplace(0.0, nodes[0]);
-
-    size_t count = 0;
-    while (!pq.empty() && count < nodes.size()) {
-        double weight = pq.top().first;
-        size_t u = pq.top().second;
-        pq.pop();
-
-        if (inMST[u]) continue;
-        inMST[u] = true;
-        mst_cost += weight;
-        count++;
-
-        for (size_t v : nodes) {
-            if (!inMST[v] && dist[u][v] < minEdge[v]) {
-                minEdge[v] = dist[u][v];
-                pq.emplace(minEdge[v], v);
-            }
+double computeLowerBound(const vector<vector<double>>& dist, const vector<bool>& visited, const vector<pair<double, double>>& min_two) {
+    double lb = 0.0;
+    for (size_t i = 0; i < dist.size(); ++i) {
+        if (!visited[i]) {
+            lb += min_two[i].first;
+            lb += min_two[i].second;
         }
     }
-
-    if (count != nodes.size()) {
-        return numeric_limits<double>::infinity();
-    }
-
-    return mst_cost;
+    return lb / 2.0;
 }
 
 void handleOPTTSP(const vector<pair<int, int>>& vertices) {
@@ -326,59 +298,70 @@ void handleOPTTSP(const vector<pair<int, int>>& vertices) {
             else
                 dist[i][j] = 0.0;
 
-    priority_queue<BBNode> pq;
-    BBNode root;
-    root.path.push_back(0);
-    root.cost = 0.0;
-
-    vector<size_t> remaining_nodes;
-    for (size_t i = 1; i < n; ++i) remaining_nodes.push_back(i);
-    root.bound = calculateMST(dist, remaining_nodes, n);
-
-    pq.push(root);
+    vector<pair<double, double>> min_two(n, {numeric_limits<double>::infinity(), numeric_limits<double>::infinity()});
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j) continue;
+            double d = dist[i][j];
+            if (d < min_two[i].first) {
+                min_two[i].second = min_two[i].first;
+                min_two[i].first = d;
+            }
+            else if (d < min_two[i].second) {
+                min_two[i].second = d;
+            }
+        }
+    }
 
     double best_cost = numeric_limits<double>::infinity();
     vector<size_t> best_path;
 
-    while (!pq.empty()) {
-        BBNode current = pq.top();
-        pq.pop();
+    vector<bool> visited(n, false);
+    visited[0] = true;
+    vector<size_t> path;
+    path.push_back(0);
 
-        if (current.bound >= best_cost) continue;
+    auto computeLB = [&](const vector<bool>& visited_ref) -> double {
+        return computeLowerBound(dist, visited_ref, min_two);
+    };
 
-        if (current.path.size() == n) {
-            double total_cost = current.cost + dist[current.path.back()][0];
+    function<void(size_t, size_t, double)> tsp_recursive = [&](size_t current, size_t count, double current_cost) {
+        if (count == n) {
+            double total_cost = current_cost + dist[current][0];
             if (total_cost < best_cost) {
                 best_cost = total_cost;
-                best_path = current.path;
+                best_path = path;
             }
-            continue;
+            return;
         }
 
+        vector<size_t> candidates;
         for (size_t next = 0; next < n; ++next) {
-            if (find(current.path.begin(), current.path.end(), next) != current.path.end()) continue;
-
-            BBNode child = current;
-            child.path.push_back(next);
-            child.cost += dist[child.path[child.path.size() - 2]][next];
-
-            vector<size_t> child_remaining;
-            for (size_t i = 0; i < n; ++i) {
-                if (find(child.path.begin(), child.path.end(), i) == child.path.end()) {
-                    child_remaining.push_back(i);
-                }
-            }
-            if (child_remaining.empty()) {
-                child.bound = child.cost + dist[next][0];
-            } else {
-                child.bound = child.cost + calculateMST(dist, child_remaining, n);
-            }
-
-            if (child.bound < best_cost) {
-                pq.push(child);
+            if (!visited[next]) {
+                candidates.push_back(next);
             }
         }
-    }
+
+        sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) -> bool {
+            return dist[current][a] < dist[current][b];
+        });
+
+        for (size_t next : candidates) {
+            double new_cost = current_cost + dist[current][next];
+            if (new_cost >= best_cost) continue;
+
+            double lb = new_cost + computeLB(visited);
+            if (lb >= best_cost) continue;
+
+            visited[next] = true;
+            path.push_back(next);
+            tsp_recursive(next, count + 1, new_cost);
+            path.pop_back();
+            visited[next] = false;
+        }
+    };
+
+    tsp_recursive(0, 1, 0.0);
 
     cout << best_cost << "\n";
     for (size_t city : best_path) {
